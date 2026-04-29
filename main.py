@@ -7,6 +7,20 @@
 # imports
 #%%
 import pandas as pd
+import numpy as np
+from nltk.stem import WordNetLemmatizer
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import normalize
+from sklearn.feature_extraction import text
+from sklearn.cluster import KMeans
+from sklearn.cluster import SpectralClustering
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import silhouette_score, calinski_harabasz_score
+from sklearn.decomposition import PCA
+from sklearn.ensemble import IsolationForest
+SEED = 66
 display = print
 #%% md
 # datasets
@@ -33,9 +47,6 @@ for name, df in datasets.items():
 #%% md
 # filtering, cleaning and bag-of-words
 #%%
-from sklearn.feature_extraction.text import CountVectorizer
-from nltk.stem import WordNetLemmatizer
-
 # setup Lemmatizer
 lem = WordNetLemmatizer()
 def lemma_tokenizer(doc):
@@ -78,10 +89,6 @@ display(word_counts.sort_values(by='Count', ascending=False).head())
 #%% md
 # tfidf
 #%%
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import normalize
-from sklearn.feature_extraction import text
-
 # add custom words to remove
 stop_words = text.ENGLISH_STOP_WORDS.union(['ha', 'doe', 'u', 'wa', 't', 'c', 'v'])
 
@@ -101,10 +108,9 @@ tfidf_norm = normalize(tfidf_matrix)
 #%% md
 # k-means clustering
 #%%
-from sklearn.cluster import KMeans
-
-SEED = 66
-km = KMeans(n_clusters=10, random_state=SEED, n_init=10)
+CLUSTER_COUNT = 10
+RANDOM_INITS = 10
+km = KMeans(n_clusters=CLUSTER_COUNT, random_state=SEED, n_init=RANDOM_INITS)
 
 # fit and predict
 df_articles['kmeans_clusters'] = km.fit_predict(tfidf_norm)
@@ -113,16 +119,13 @@ print(df_articles['kmeans_clusters'].value_counts())
 #%% md
 # spectral clustering
 #%%
-from sklearn.cluster import SpectralClustering
-from sklearn.metrics.pairwise import cosine_similarity
-
 # calculate cosine similarity
 affinity_matrix = cosine_similarity(tfidf_norm)
 
 # use Spectral Clustering with the 'discretize' label strategy
-SEED = 66
+CLUSTER_COUNT = 10
 sc_improved = SpectralClustering(
-    n_clusters=10,
+    n_clusters=CLUSTER_COUNT,
     affinity='precomputed', # tell it we already calculated the similarity
     assign_labels='discretize',
     random_state=SEED
@@ -135,9 +138,6 @@ print(df_articles['spectral_clusters'].value_counts())
 #%% md
 # evaluation
 #%%
-from sklearn.metrics import silhouette_score, calinski_harabasz_score
-import numpy as np
-
 # list to store results
 eval_results = []
 
@@ -187,6 +187,22 @@ get_top_keywords(df_articles['kmeans_clusters'])
 print("-- Method B: SPECTRAL --")
 get_top_keywords(df_articles['spectral_clusters'])
 #%% md
+# graph
+#%%
+# squash high-dimensional TF-IDF data into 2D points
+coords = PCA(n_components=2, random_state=SEED).fit_transform(tfidf_norm.toarray())
+
+# compare the two clustering results side-by-side
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+axes[0].scatter(coords[:, 0], coords[:, 1], c=df_articles['kmeans_clusters'], s=5, cmap='viridis')
+axes[0].set_title('K-Means')
+
+axes[1].scatter(coords[:, 0], coords[:, 1], c=df_articles['spectral_clusters'], s=5, cmap='magma')
+axes[1].set_title('Spectral')
+
+plt.show()
+#%% md
 # export
 #%%
 # get clusters
@@ -206,11 +222,7 @@ print(f"Total records exported: {len(output_df)}")
 #%% md
 # identify anomalies
 #%%
-import pandas as pd
-from sklearn.ensemble import IsolationForest
-
 # initialize and fit the model
-SEED = 66
 contamination_rate = 50 / len(df_articles)
 iso_forest = IsolationForest(n_estimators=100, contamination=contamination_rate, random_state=SEED)
 iso_forest.fit(tfidf_norm)
@@ -230,3 +242,16 @@ anomalies_output.to_csv('anomalies.csv', index=False)
 
 print("'anomalies.csv' filled with 50 IDs")
 print(anomalies_output.head())
+#%% md
+# graph
+#%%
+# plot the histogram of all scores
+plt.hist(df_articles['anomaly_score'], bins=50, color='gray', alpha=0.7)
+
+# draw a line at the threshold of the 50th most anomalous file
+threshold = anomalies_df['anomaly_score'].max()
+plt.axvline(threshold, color='red', linestyle='--', label='anomaly cutoff')
+
+plt.title('Anomaly Distribution')
+plt.legend()
+plt.show()
